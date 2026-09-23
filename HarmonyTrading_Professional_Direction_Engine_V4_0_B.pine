@@ -1,19 +1,16 @@
-//@version=6
-indicator("HarmonyTrading Professional Direction Engine V4.0-C", overlay=true, max_bars_back=1000, max_labels_count=100)
+ //@version=6
+indicator("HarmonyTrading Professional Direction Engine V4.0-D", overlay=true, max_bars_back=1000, max_labels_count=100)
 
 //====================================================================
-// HARMONYTRADING — V4.0-C
+// HARMONYTRADING — V4.0-D
 // MARKET-STRUCTURE-FIRST DIRECTION ENGINE
 //
 // Daily = strategic context
 // 4H = primary direction
 // Local chart structure = execution confirmation
 //
-// This version intentionally contains NO 5M level engine and
-// NO Order Assessor.
-// Those are added only after the direction engine is validated.
+// Structure labels are anchored directly to pivot price/time.
 //====================================================================
-
 
 //====================================================================
 // INPUTS
@@ -25,76 +22,19 @@ string G_VISUAL = "02 — Visuals"
 string dailyTF = input.timeframe("D", "Daily timeframe", group=G_STRUCTURE)
 string fourHourTF = input.timeframe("240", "4H timeframe", group=G_STRUCTURE)
 
-int pivotLength = input.int(
-     5,
-     "Structure pivot length",
-     minval=2,
-     maxval=20,
-     group=G_STRUCTURE)
+int pivotLength = input.int(5, "Structure pivot length", minval=2, maxval=20, group=G_STRUCTURE)
+int emaLength = input.int(200, "EMA length", minval=20, maxval=500, group=G_STRUCTURE)
+int eventWindow = input.int(16, "Local event window", minval=6, maxval=50, group=G_STRUCTURE)
+int minimumEvents = input.int(4, "Minimum local events", minval=2, maxval=20, group=G_STRUCTURE)
+int minimumSameSide = input.int(3, "Minimum same-side events", minval=2, maxval=15, group=G_STRUCTURE)
 
-int emaLength = input.int(
-     200,
-     "EMA length",
-     minval=20,
-     maxval=500,
-     group=G_STRUCTURE)
+bool requireFourHourStructure = input.bool(true, "Require 4H structure alignment", group=G_STRUCTURE)
+bool requireFourHourEMA = input.bool(true, "Require 4H EMA alignment", group=G_STRUCTURE)
+bool requireDailyAgreement = input.bool(false, "Require Daily agreement", group=G_STRUCTURE)
 
-int eventWindow = input.int(
-     16,
-     "Local event window",
-     minval=6,
-     maxval=50,
-     group=G_STRUCTURE)
-
-int minimumEvents = input.int(
-     4,
-     "Minimum local events",
-     minval=2,
-     maxval=20,
-     group=G_STRUCTURE)
-
-int minimumSameSide = input.int(
-     3,
-     "Minimum same-side events",
-     minval=2,
-     maxval=15,
-     group=G_STRUCTURE)
-
-bool requireFourHourStructure = input.bool(
-     true,
-     "Require 4H structure alignment",
-     group=G_STRUCTURE)
-
-bool requireFourHourEMA = input.bool(
-     true,
-     "Require 4H EMA alignment",
-     group=G_STRUCTURE)
-
-bool requireDailyAgreement = input.bool(
-     false,
-     "Require Daily agreement",
-     group=G_STRUCTURE)
-
-bool showEMA = input.bool(
-     true,
-     "Show 200 EMA",
-     group=G_VISUAL)
-
-bool showStructureLabels = input.bool(
-     true,
-     "Show HH / HL / LH / LL",
-     group=G_VISUAL)
-
-bool showDirectionLine = input.bool(
-     true,
-     "Show direction line",
-     group=G_VISUAL)
-
-bool showDashboard = input.bool(
-     true,
-     "Show dashboard",
-     group=G_VISUAL)
-
+bool showEMA = input.bool(true, "Show 200 EMA", group=G_VISUAL)
+bool showStructureLabels = input.bool(true, "Show HH / HL / LH / LL", group=G_VISUAL)
+bool showDashboard = input.bool(true, "Show dashboard", group=G_VISUAL)
 
 //====================================================================
 // CONSTANTS
@@ -104,26 +44,22 @@ int TRANSITION = 0
 int BULLISH = 1
 int BEARISH = -1
 
-
 //====================================================================
 // LOCAL STRUCTURE
 //====================================================================
 
-float localPivotHigh = ta.pivothigh(
-     high,
-     pivotLength,
-     pivotLength)
-
-float localPivotLow = ta.pivotlow(
-     low,
-     pivotLength,
-     pivotLength)
+float localPivotHigh = ta.pivothigh(high, pivotLength, pivotLength)
+float localPivotLow = ta.pivotlow(low, pivotLength, pivotLength)
 
 var float previousLocalHigh = na
 var float latestLocalHigh = na
+var int previousLocalHighBar = na
+var int latestLocalHighBar = na
 
 var float previousLocalLow = na
 var float latestLocalLow = na
+var int previousLocalLowBar = na
+var int latestLocalLowBar = na
 
 var int localHighState = TRANSITION
 var int localLowState = TRANSITION
@@ -133,6 +69,16 @@ bool newLH = false
 bool newHL = false
 bool newLL = false
 
+//====================================================================
+// STRUCTURE LABEL STORAGE
+//====================================================================
+
+var label[] structureLabels = array.new_label()
+
+// Keep the chart clean.
+while array.size(structureLabels) > 80
+    label oldLabel = array.shift(structureLabels)
+    label.delete(oldLabel)
 
 //====================================================================
 // HIGH STRUCTURE
@@ -141,7 +87,10 @@ bool newLL = false
 if not na(localPivotHigh)
 
     previousLocalHigh := latestLocalHigh
+    previousLocalHighBar := latestLocalHighBar
+
     latestLocalHigh := localPivotHigh
+    latestLocalHighBar := bar_index - pivotLength
 
     if not na(previousLocalHigh)
 
@@ -159,7 +108,6 @@ if not na(localPivotHigh)
 
             localHighState := TRANSITION
 
-
 //====================================================================
 // LOW STRUCTURE
 //====================================================================
@@ -167,7 +115,10 @@ if not na(localPivotHigh)
 if not na(localPivotLow)
 
     previousLocalLow := latestLocalLow
+    previousLocalLowBar := latestLocalLowBar
+
     latestLocalLow := localPivotLow
+    latestLocalLowBar := bar_index - pivotLength
 
     if not na(previousLocalLow)
 
@@ -185,15 +136,80 @@ if not na(localPivotLow)
 
             localLowState := TRANSITION
 
+//====================================================================
+// PRICE-ANCHORED STRUCTURE LABELS
+//
+// These are anchored to the actual pivot bar and pivot price.
+// They therefore move with the candles when the chart is panned
+// or zoomed.
+//====================================================================
+
+if showStructureLabels
+
+    if newHH
+
+        label hhLabel = label.new(
+             x=latestLocalHighBar,
+             y=latestLocalHigh,
+             text="HH",
+             xloc=xloc.bar_index,
+             yloc=yloc.price,
+             style=label.style_label_down,
+             color=color.green,
+             textcolor=color.white,
+             size=size.tiny)
+
+        array.push(structureLabels, hhLabel)
+
+    if newLH
+
+        label lhLabel = label.new(
+             x=latestLocalHighBar,
+             y=latestLocalHigh,
+             text="LH",
+             xloc=xloc.bar_index,
+             yloc=yloc.price,
+             style=label.style_label_down,
+             color=color.red,
+             textcolor=color.white,
+             size=size.tiny)
+
+        array.push(structureLabels, lhLabel)
+
+    if newHL
+
+        label hlLabel = label.new(
+             x=latestLocalLowBar,
+             y=latestLocalLow,
+             text="HL",
+             xloc=xloc.bar_index,
+             yloc=yloc.price,
+             style=label.style_label_up,
+             color=color.green,
+             textcolor=color.white,
+             size=size.tiny)
+
+        array.push(structureLabels, hlLabel)
+
+    if newLL
+
+        label llLabel = label.new(
+             x=latestLocalLowBar,
+             y=latestLocalLow,
+             text="LL",
+             xloc=xloc.bar_index,
+             yloc=yloc.price,
+             style=label.style_label_up,
+             color=color.red,
+             textcolor=color.white,
+             size=size.tiny)
+
+        array.push(structureLabels, llLabel)
 
 //====================================================================
 // LOCAL EVENT SEQUENCE
-//
-// +1 = bullish event
-//      HH or HL
-//
-// -1 = bearish event
-//      LH or LL
+// +1 = HH or HL
+// -1 = LH or LL
 //====================================================================
 
 var array<int> localEvents = array.new_int()
@@ -214,22 +230,14 @@ while array.size(localEvents) > eventWindow
     array.shift(localEvents)
 
 int localEventCount = array.size(localEvents)
-
 int bullishEventCount = 0
 int bearishEventCount = 0
-
-
-//====================================================================
-// COUNT LOCAL EVENTS
-//====================================================================
 
 if localEventCount > 0
 
     for i = 0 to localEventCount - 1
 
-        int eventValue = array.get(
-             localEvents,
-             i)
+        int eventValue = array.get(localEvents, i)
 
         if eventValue == 1
 
@@ -239,19 +247,8 @@ if localEventCount > 0
 
             bearishEventCount += 1
 
-
-//====================================================================
-// SEQUENCE DIRECTION
-//====================================================================
-
 bool bullishSequence = bullishEventCount > bearishEventCount
-
 bool bearishSequence = bearishEventCount > bullishEventCount
-
-
-//====================================================================
-// LOCAL STRUCTURAL STATES
-//====================================================================
 
 bool localBullishStructure =
      localHighState == BULLISH and
@@ -261,14 +258,8 @@ bool localBearishStructure =
      localHighState == BEARISH and
      localLowState == BEARISH
 
-
-//====================================================================
-// LOCAL STRUCTURE GATES
-//====================================================================
-
 bool bullishLocalGate = false
 bool bearishLocalGate = false
-
 
 if localBullishStructure
 
@@ -280,7 +271,6 @@ if localBullishStructure
 
                 bullishLocalGate := true
 
-
 if localBearishStructure
 
     if bearishSequence
@@ -291,34 +281,22 @@ if localBearishStructure
 
                 bearishLocalGate := true
 
-
 //====================================================================
 // LOCAL 200 EMA
 //====================================================================
 
-float localEMA = ta.ema(
-     close,
-     emaLength)
-
+float localEMA = ta.ema(close, emaLength)
 
 //====================================================================
 // HIGHER-TIMEFRAME STRUCTURE FUNCTIONS
-//
-// These functions deliberately return one simple integer.
-// This avoids the tuple-return architecture that caused previous
-// parser/compiler problems.
 //====================================================================
 
 f_highRelation(int pLen) =>
 
-    float ph = ta.pivothigh(
-         high,
-         pLen,
-         pLen)
+    float ph = ta.pivothigh(high, pLen, pLen)
 
     var float previousHigh = na
     var float latestHigh = na
-
     var int relation = 0
 
     if not na(ph)
@@ -342,21 +320,12 @@ f_highRelation(int pLen) =>
 
     relation
 
-
-//====================================================================
-// LOW RELATION FUNCTION
-//====================================================================
-
 f_lowRelation(int pLen) =>
 
-    float pl = ta.pivotlow(
-         low,
-         pLen,
-         pLen)
+    float pl = ta.pivotlow(low, pLen, pLen)
 
     var float previousLow = na
     var float latestLow = na
-
     var int relation = 0
 
     if not na(pl)
@@ -380,16 +349,9 @@ f_lowRelation(int pLen) =>
 
     relation
 
-
-//====================================================================
-// EMA STATE FUNCTION
-//====================================================================
-
 f_emaState(int eLen) =>
 
-    float emaValue = ta.ema(
-         close,
-         eLen)
+    float emaValue = ta.ema(close, eLen)
 
     int state = 0
 
@@ -403,13 +365,8 @@ f_emaState(int eLen) =>
 
     state
 
-
 //====================================================================
 // DAILY CONFIRMED STRUCTURE
-//
-// Previous completed Daily bar is used.
-// lookahead_on is paired with [1] to prevent using the currently
-// forming Daily bar.
 //====================================================================
 
 int dailyHighState =
@@ -426,18 +383,6 @@ int dailyLowState =
          f_lowRelation(pivotLength)[1],
          lookahead=barmerge.lookahead_on)
 
-int dailyEMAState =
-     request.security(
-         syminfo.tickerid,
-         dailyTF,
-         f_emaState(emaLength)[1],
-         lookahead=barmerge.lookahead_on)
-
-
-//====================================================================
-// DAILY STRUCTURE STATE
-//====================================================================
-
 bool dailyBullish =
      dailyHighState == BULLISH and
      dailyLowState == BULLISH
@@ -445,7 +390,6 @@ bool dailyBullish =
 bool dailyBearish =
      dailyHighState == BEARISH and
      dailyLowState == BEARISH
-
 
 //====================================================================
 // 4H CONFIRMED STRUCTURE
@@ -472,11 +416,6 @@ int fourHourEMAState =
          f_emaState(emaLength)[1],
          lookahead=barmerge.lookahead_on)
 
-
-//====================================================================
-// 4H STRUCTURE STATE
-//====================================================================
-
 bool fourHourBullish =
      fourHourHighState == BULLISH and
      fourHourLowState == BULLISH
@@ -485,9 +424,8 @@ bool fourHourBearish =
      fourHourHighState == BEARISH and
      fourHourLowState == BEARISH
 
-
 //====================================================================
-// 4H STRUCTURE GATES
+// DIRECTION GATES
 //====================================================================
 
 bool bullishFourHourGate = true
@@ -498,26 +436,13 @@ if requireFourHourStructure
     bullishFourHourGate := fourHourBullish
     bearishFourHourGate := fourHourBearish
 
-
-//====================================================================
-// 4H EMA GATES
-//====================================================================
-
 bool bullishEMAGate = true
 bool bearishEMAGate = true
 
 if requireFourHourEMA
 
-    bullishEMAGate :=
-         fourHourEMAState == BULLISH
-
-    bearishEMAGate :=
-         fourHourEMAState == BEARISH
-
-
-//====================================================================
-// DAILY GATES
-//====================================================================
+    bullishEMAGate := fourHourEMAState == BULLISH
+    bearishEMAGate := fourHourEMAState == BEARISH
 
 bool bullishDailyGate = true
 bool bearishDailyGate = true
@@ -527,18 +452,8 @@ if requireDailyAgreement
     bullishDailyGate := dailyBullish
     bearishDailyGate := dailyBearish
 
-
-//====================================================================
-// FINAL DIRECTION READINESS
-//====================================================================
-
 bool bullishReady = false
 bool bearishReady = false
-
-
-//====================================================================
-// BULLISH READINESS
-//====================================================================
 
 if bullishLocalGate
 
@@ -550,11 +465,6 @@ if bullishLocalGate
 
                 bullishReady := true
 
-
-//====================================================================
-// BEARISH READINESS
-//====================================================================
-
 if bearishLocalGate
 
     if bearishFourHourGate
@@ -564,11 +474,6 @@ if bearishLocalGate
             if bearishDailyGate
 
                 bearishReady := true
-
-
-//====================================================================
-// FINAL DIRECTION STATE
-//====================================================================
 
 int directionState = TRANSITION
 
@@ -580,20 +485,11 @@ else if bearishReady and not bullishReady
 
     directionState := BEARISH
 
-
 //====================================================================
 // DIRECTION CONFIDENCE
-//
-// Informational only.
-// Structural gates determine the actual direction.
 //====================================================================
 
 float directionConfidence = 0.0
-
-
-//====================================================================
-// BULLISH CONFIDENCE
-//====================================================================
 
 if directionState == BULLISH
 
@@ -603,19 +499,15 @@ if directionState == BULLISH
     float dailyPart = 0.0
 
     if bullishEventCount > bearishEventCount
-
         localPart := 25.0
 
     if fourHourBullish
-
         fourHourPart := 35.0
 
     if fourHourEMAState == BULLISH
-
         emaPart := 25.0
 
     if dailyBullish
-
         dailyPart := 15.0
 
     directionConfidence :=
@@ -623,11 +515,6 @@ if directionState == BULLISH
          fourHourPart +
          emaPart +
          dailyPart
-
-
-//====================================================================
-// BEARISH CONFIDENCE
-//====================================================================
 
 else if directionState == BEARISH
 
@@ -637,19 +524,15 @@ else if directionState == BEARISH
     float dailyPart = 0.0
 
     if bearishEventCount > bullishEventCount
-
         localPart := 25.0
 
     if fourHourBearish
-
         fourHourPart := 35.0
 
     if fourHourEMAState == BEARISH
-
         emaPart := 25.0
 
     if dailyBearish
-
         dailyPart := 15.0
 
     directionConfidence :=
@@ -658,7 +541,6 @@ else if directionState == BEARISH
          emaPart +
          dailyPart
 
-
 //====================================================================
 // DISPLAY TEXT
 //====================================================================
@@ -666,82 +548,61 @@ else if directionState == BEARISH
 string directionText = "TRANSITION"
 
 if directionState == BULLISH
-
     directionText := "BULLISH"
 
 else if directionState == BEARISH
-
     directionText := "BEARISH"
-
 
 string structureText = "MIXED"
 
 if localBullishStructure
-
     structureText := "HH + HL"
 
 else if localBearishStructure
-
     structureText := "LH + LL"
-
 
 string sequenceText = "MIXED"
 
 if bullishSequence
-
     sequenceText := "BULLISH SEQUENCE"
 
 else if bearishSequence
-
     sequenceText := "BEARISH SEQUENCE"
-
 
 string dailyText = "MIXED"
 
 if dailyBullish
-
     dailyText := "BULLISH"
 
 else if dailyBearish
-
     dailyText := "BEARISH"
-
 
 string fourHourText = "MIXED"
 
 if fourHourBullish
-
     fourHourText := "BULLISH"
 
 else if fourHourBearish
-
     fourHourText := "BEARISH"
-
 
 string emaText = "NEUTRAL"
 
 if fourHourEMAState == BULLISH
-
     emaText := "BULLISH"
 
 else if fourHourEMAState == BEARISH
-
     emaText := "BEARISH"
-
 
 string setupText = "NO ACTIVE SETUP"
 
 if directionState == BULLISH
-
     setupText := "LONG DIRECTION CONFIRMED"
 
 else if directionState == BEARISH
-
     setupText := "SHORT DIRECTION CONFIRMED"
 
-
 //====================================================================
-// 200 EMA VISUAL
+// EMA VISUAL
 //====================================================================
 
 plot(
@@ -749,98 +610,6 @@ plot(
      title="200 EMA",
      color=color.orange,
      linewidth=2)
-
-
-//====================================================================
-// STRUCTURE LABELS
-//====================================================================
-
-plotshape(
-     showStructureLabels and newHH,
-     title="HH",
-     style=shape.labeldown,
-     location=location.abovebar,
-     offset=-pivotLength,
-     color=color.green,
-     textcolor=color.white,
-     size=size.tiny,
-     text="HH")
-
-plotshape(
-     showStructureLabels and newHL,
-     title="HL",
-     style=shape.labelup,
-     location=location.belowbar,
-     offset=-pivotLength,
-     color=color.green,
-     textcolor=color.white,
-     size=size.tiny,
-     text="HL")
-
-plotshape(
-     showStructureLabels and newLH,
-     title="LH",
-     style=shape.labeldown,
-     location=location.abovebar,
-     offset=-pivotLength,
-     color=color.red,
-     textcolor=color.white,
-     size=size.tiny,
-     text="LH")
-
-plotshape(
-     showStructureLabels and newLL,
-     title="LL",
-     style=shape.labelup,
-     location=location.belowbar,
-     offset=-pivotLength,
-     color=color.red,
-     textcolor=color.white,
-     size=size.tiny,
-     text="LL")
-
-
-//====================================================================
-// DIRECTION STATE LINE
-//
-// Green  = bullish
-// Red    = bearish
-// Orange = transition
-//====================================================================
-
-float directionATR = ta.atr(14)
-
-float directionLinePrice = close
-
-if directionState == BULLISH
-
-    directionLinePrice :=
-         high + directionATR * 0.65
-
-else if directionState == BEARISH
-
-    directionLinePrice :=
-         low - directionATR * 0.65
-
-
-color directionLineColor = color.orange
-
-if directionState == BULLISH
-
-    directionLineColor := color.lime
-
-else if directionState == BEARISH
-
-    directionLineColor := color.red
-
-
-plot(
-     showDirectionLine ? directionLinePrice : na,
-     title="Direction State",
-     color=directionLineColor,
-     linewidth=3,
-     style=plot.style_linebr)
-
 
 //====================================================================
 // DASHBOARD
@@ -857,7 +626,6 @@ var table dashboard =
          border_color=color.gray,
          border_width=1)
 
-
 if barstate.islast and showDashboard
 
     table.cell(
@@ -872,7 +640,7 @@ if barstate.islast and showDashboard
          dashboard,
          1,
          0,
-         "V4.0-C",
+         "V4.0-D",
          text_color=color.white,
          bgcolor=color.new(color.blue, 40))
 
@@ -1010,7 +778,6 @@ if barstate.islast and showDashboard
          setupText,
          text_color=color.white)
 
-
 //====================================================================
 // ALERTS
 //====================================================================
@@ -1027,18 +794,17 @@ bool newTransition =
      directionState == TRANSITION and
      directionState[1] != TRANSITION
 
-
 alertcondition(
      newBullishDirection,
      title="HarmonyTrading Bullish Direction",
-     message="HarmonyTrading V4.0-C: Bullish direction confirmed. Review 5M support separately.")
+     message="HarmonyTrading V4.0-D: Bullish direction confirmed. Review 5M support separately.")
 
 alertcondition(
      newBearishDirection,
      title="HarmonyTrading Bearish Direction",
-     message="HarmonyTrading V4.0-C: Bearish direction confirmed. Review 5M resistance separately.")
+     message="HarmonyTrading V4.0-D: Bearish direction confirmed. Review 5M resistance separately.")
 
 alertcondition(
      newTransition,
      title="HarmonyTrading Transition",
-     message="HarmonyTrading V4.0-C: Market structure is in transition. No active directional setup.")
+     message="HarmonyTrading V4.0-D: Market structure is in transition. No active directional setup.")
